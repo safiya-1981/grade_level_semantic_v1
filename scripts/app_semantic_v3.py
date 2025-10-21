@@ -30,7 +30,7 @@ h2, h3, h4 { color: #004E7C !important; }
 """
 st.markdown(page_bg, unsafe_allow_html=True)
 
-# 🇺🇿 Sarlavha — faqat bayroq (gerb yo'q)
+# 🇺🇿 Sarlavha — faqat bayroq (gerb yo‘q)
 flag_url = "https://upload.wikimedia.org/wikipedia/commons/8/84/Flag_of_Uzbekistan.svg"
 st.markdown(
     f"""
@@ -49,9 +49,9 @@ st.caption("🇺🇿 O‘quvchilarga mos adabiy matn darajasini aniqlovchi mashi
 
 # =================== YO‘LLAR ===================
 HERE = Path(__file__).resolve().parent
-MODELS_DIR = HERE.parent / "models"
-ENCODER_DIR = MODELS_DIR / "semantic_encoder"
-CLASSIFIER_PATH = MODELS_DIR / "semantic_classifier.pkl"
+MODELS_DIR = (HERE.parent / "models").resolve()
+ENCODER_DIR = (MODELS_DIR / "semantic_encoder").resolve()
+CLASSIFIER_PATH = (MODELS_DIR / "semantic_classifier.pkl").resolve()
 
 # =================== KIRILL → LOTIN ===================
 def kiril_to_latin(text: str) -> str:
@@ -71,18 +71,19 @@ def kiril_to_latin(text: str) -> str:
 @st.cache_resource(show_spinner=False)
 def load_models():
     """
-    Cloud uchun barqaror: agar local encoder papkasi bo'lmasa,
-    HuggingFace'dan 'intfloat/multilingual-e5-base' yuklanadi.
+    Cloud-da barqaror ishlashi uchun: agar lokal encoder papkasi bor va bo'sh bo'lmasa — shundan,
+    aks holda HuggingFace'dan 'intfloat/multilingual-e5-base' yuklanadi.
     """
     HF_MODEL = "intfloat/multilingual-e5-base"
 
-    if ENCODER_DIR.exists():
+    encoder_path_ok = ENCODER_DIR.exists() and any(ENCODER_DIR.iterdir())
+    if encoder_path_ok:
         enc = SentenceTransformer(ENCODER_DIR.as_posix(), device="cpu")
     else:
         enc = SentenceTransformer(HF_MODEL, device="cpu")
 
     if not CLASSIFIER_PATH.exists():
-        st.error("❌ `models/semantic_classifier.pkl` topilmadi. Uni repoga joylang va qayta ishga tushiring.")
+        st.error("❌ `models/semantic_classifier.pkl` topilmadi. Uni repoga joylang va ilovani qayta ishga tushiring.")
         st.stop()
 
     clf = joblib.load(CLASSIFIER_PATH)
@@ -96,7 +97,6 @@ def read_file(uploaded_file) -> str:
     text = ""
     try:
         if ext == "txt":
-            # UTF-8 BOM va boshqa kodlashlar uchun xavfsiz o‘qish
             raw = uploaded_file.read()
             for enc_try in ("utf-8-sig", "utf-8", "cp1251", "cp1252"):
                 try:
@@ -128,7 +128,6 @@ def predict_text(text: str):
     idx = int(np.argmax(probs))
     pred = classes[idx]
     conf = float(probs[idx])
-    # sinflarni tartib bilan qaytaramiz
     details = sorted(zip(classes, probs), key=lambda x: int(x[0]))
     return pred, conf, details
 
@@ -141,7 +140,7 @@ with st.sidebar:
     st.write("👩‍🏫 O‘qituvchi uchun:")
     st.text_input("PIN", type="password", key="pin")
 
-    # 🔁 Yangi tekshiruv tugmasi — Streamlit 1.50 uchun to‘g‘ri usul
+    # 🔁 Yangi tekshiruv tugmasi — Streamlit 1.50 uchun
     if st.button("🔁 Yangi tekshiruv / Tozalash"):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
@@ -170,7 +169,7 @@ if st.button("✅ Baholash", type="primary"):
     if not text or not text.strip():
         st.warning("Iltimos, matn kiriting yoki fayl yuklang.")
     else:
-        # Juda uzun matnlar uchun kesib qo'yamiz (SBERT/E5 uchun xavfsizroq)
+        # Juda uzun matnlar uchun xavfsiz kesish
         if len(text) > 12000:
             text = text[:12000]
             st.caption("ℹ️ Juda uzun matn qisqartirildi (12,000 belgi).")
@@ -192,6 +191,7 @@ if st.button("✅ Baholash", type="primary"):
         ax.set_ylabel("Ehtimol")
         ax.set_xlabel("Sinf")
         ax.set_title("Sinf bo‘yicha ehtimollar grafigi", fontsize=10)
+        plt.tight_layout()
         st.pyplot(fig)
 
 st.markdown("<hr>", unsafe_allow_html=True)
