@@ -3,8 +3,7 @@ import joblib
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from pathlib import Path
-import os, re
-from io import BytesIO
+import re
 from docx import Document
 import PyPDF2
 import matplotlib.pyplot as plt
@@ -26,14 +25,12 @@ page_bg = """
 [data-testid="stSidebar"] {
     background-color: rgba(240,240,240,0.9);
 }
-h2, h3, h4 {
-    color: #004E7C !important;
-}
+h2, h3, h4 { color: #004E7C !important; }
 </style>
 """
 st.markdown(page_bg, unsafe_allow_html=True)
 
-# 🇺🇿 Sarlavha — faqat bayroq (gerb olib tashlangan)
+# 🇺🇿 Sarlavha — faqat bayroq (gerb yo'q)
 flag_url = "https://upload.wikimedia.org/wikipedia/commons/8/84/Flag_of_Uzbekistan.svg"
 st.markdown(
     f"""
@@ -57,7 +54,7 @@ ENCODER_DIR = MODELS_DIR / "semantic_encoder"
 CLASSIFIER_PATH = MODELS_DIR / "semantic_classifier.pkl"
 
 # =================== KIRILL → LOTIN ===================
-def kiril_to_latin(text):
+def kiril_to_latin(text: str) -> str:
     pairs = {
         "А":"A","а":"a","Б":"B","б":"b","В":"V","в":"v","Г":"G","г":"g","Д":"D","д":"d",
         "Е":"E","е":"e","Ё":"Yo","ё":"yo","Ж":"J","ж":"j","З":"Z","з":"z","И":"I","и":"i",
@@ -73,38 +70,67 @@ def kiril_to_latin(text):
 # =================== MODEL YUKLASH ===================
 @st.cache_resource(show_spinner=False)
 def load_models():
-    enc = SentenceTransformer(ENCODER_DIR.as_posix(), device="cpu")
+    """
+    Cloud uchun barqaror: agar local encoder papkasi bo'lmasa,
+    HuggingFace'dan 'intfloat/multilingual-e5-base' yuklanadi.
+    """
+    HF_MODEL = "intfloat/multilingual-e5-base"
+
+    if ENCODER_DIR.exists():
+        enc = SentenceTransformer(ENCODER_DIR.as_posix(), device="cpu")
+    else:
+        enc = SentenceTransformer(HF_MODEL, device="cpu")
+
+    if not CLASSIFIER_PATH.exists():
+        st.error("❌ `models/semantic_classifier.pkl` topilmadi. Uni repoga joylang va qayta ishga tushiring.")
+        st.stop()
+
     clf = joblib.load(CLASSIFIER_PATH)
     return enc, clf
 
 encoder, clf = load_models()
 
 # =================== FUNKSIYALAR ===================
-def read_file(uploaded_file):
+def read_file(uploaded_file) -> str:
     ext = uploaded_file.name.lower().split(".")[-1]
     text = ""
-    if ext == "txt":
-        text = uploaded_file.read().decode("utf-8", errors="ignore")
-    elif ext == "docx":
-        doc = Document(uploaded_file)
-        text = "\n".join([p.text for p in doc.paragraphs])
-    elif ext == "pdf":
-        reader = PyPDF2.PdfReader(uploaded_file)
-        for page in reader.pages:
-            text += page.extract_text() or ""
-    else:
-        st.error("❌ Faqat .txt, .docx yoki .pdf fayllar qo‘llaniladi.")
+    try:
+        if ext == "txt":
+            # UTF-8 BOM va boshqa kodlashlar uchun xavfsiz o‘qish
+            raw = uploaded_file.read()
+            for enc_try in ("utf-8-sig", "utf-8", "cp1251", "cp1252"):
+                try:
+                    text = raw.decode(enc_try)
+                    break
+                except Exception:
+                    continue
+            if not text:
+                text = raw.decode("utf-8", errors="ignore")
+        elif ext == "docx":
+            doc = Document(uploaded_file)
+            text = "\n".join(p.text for p in doc.paragraphs)
+        elif ext == "pdf":
+            reader = PyPDF2.PdfReader(uploaded_file)
+            for page in reader.pages:
+                text += page.extract_text() or ""
+        else:
+            st.error("❌ Faqat .txt, .docx yoki .pdf fayllar qo‘llaniladi.")
+    except Exception as e:
+        st.error(f"Faylni o‘qishda xato: {e}")
     return text
 
-def predict_text(text):
+def predict_text(text: str):
+    # E5 formatida "query: ..." prefiksi
     inp = f"query: {text.strip()}"
     emb = encoder.encode([inp], normalize_embeddings=True)
     probs = clf.predict_proba(emb)[0]
     classes = clf.classes_
     idx = int(np.argmax(probs))
     pred = classes[idx]
-    conf = probs[idx]
-    return pred, conf, sorted(zip(classes, probs), key=lambda x: int(x[0]))
+    conf = float(probs[idx])
+    # sinflarni tartib bilan qaytaramiz
+    details = sorted(zip(classes, probs), key=lambda x: int(x[0]))
+    return pred, conf, details
 
 # =================== SIDEBAR ===================
 with st.sidebar:
@@ -115,7 +141,7 @@ with st.sidebar:
     st.write("👩‍🏫 O‘qituvchi uchun:")
     st.text_input("PIN", type="password", key="pin")
 
-    # 🔁 Yangi tekshiruv tugmasi — 1.50 uchun to‘g‘ri usul
+    # 🔁 Yangi tekshiruv tugmasi — Streamlit 1.50 uchun to‘g‘ri usul
     if st.button("🔁 Yangi tekshiruv / Tozalash"):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
@@ -132,7 +158,8 @@ elif mode == "Fayl yuklash":
     if uploaded:
         text = read_file(uploaded)
 
-if kiril_auto and re.search(r"[А-Яа-яЁёЎўҚқҒғҲҳ]", text):
+# Kirilni avtomatik lotinga o‘girish
+if text and kiril_auto and re.search(r"[А-Яа-яЁёЎўҚқҒғҲҳ]", text):
     text = kiril_to_latin(text)
     st.info("🔤 Kirill matn lotinga o‘girildi.")
 
@@ -140,9 +167,13 @@ st.markdown("---")
 
 # =================== PREDIKTSIYA NATIJASI ===================
 if st.button("✅ Baholash", type="primary"):
-    if not text.strip():
+    if not text or not text.strip():
         st.warning("Iltimos, matn kiriting yoki fayl yuklang.")
     else:
+        # Juda uzun matnlar uchun kesib qo'yamiz (SBERT/E5 uchun xavfsizroq)
+        if len(text) > 12000:
+            text = text[:12000]
+            st.caption("ℹ️ Juda uzun matn qisqartirildi (12,000 belgi).")
         with st.spinner("Semantik tahlil qilinmoqda..."):
             pred, conf, details = predict_text(text)
 
