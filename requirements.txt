@@ -1,0 +1,9 @@
+streamlit==1.50.0
+sentence-transformers
+scikit-learn
+torch
+numpy
+joblib
+python-docx
+PyPDF2
+matplotlib
